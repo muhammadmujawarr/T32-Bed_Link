@@ -90,6 +90,7 @@ def reserve_resources(h, required):
 
 def refresh():
     S["now"] = t = time.time()
+    changed = False
     for aid, a in S["ambulances"].items():
         if not a.get("need"): continue
         ms = S["matches"][aid] = match(a["need"]["req"], t); rec = S["scores"].setdefault(aid, {})
@@ -98,7 +99,15 @@ def refresh():
             if r is None: rec[m["id"]] = r = dict(last=m["score"], prev=None)
             elif abs(m["score"] - r["last"]) >= 3: ev("dispatch", f'Operation Match: {m["name"]} {r["last"]} → {m["score"]}', False, aid); r["prev"], r["last"] = r["last"], m["score"]
             m["prev"] = r["prev"]
-    return expire()
+        request = a.get("request")
+        if request and request["status"] == "PENDING":
+            offered = next((m for m in ms if m["id"] == request["hospital_id"]), None)
+            if not offered or not offered["ok"] or not S["hospitals"][request["hospital_id"]]["accepting"]:
+                hid, name = request["hospital_id"], request["hospital_name"]
+                ev("hospital", f'{name} can no longer fulfill {aid}: required equipment or bed capacity unavailable', True, aid, hid)
+                advance(a, request, "DECLINED", "Resources unavailable")
+                changed = True
+    return expire() or changed
 
 def q_resource(b):
     h = S["hospitals"].get(b.get("hospital")); kind, name = b.get("kind"), b.get("name")
@@ -176,6 +185,9 @@ def q_request(b):  # ambulance -> ONE chosen hospital. Only creates a PENDING re
     required = list((a.get("need") or {}).get("req", []))
     if not hospital_has_resources(S["hospitals"][hid], required):
         raise ValueError("This hospital does not have all required equipment or bed capacity")
+    candidate = next((m for m in match(required, time.time()) if m["id"] == hid), None)
+    if not candidate or not candidate["ok"] or not S["hospitals"][hid]["accepting"]:
+        raise ValueError("This hospital is not currently eligible for this request")
     cur = a.get("request")
     if cur and cur["status"] == "PENDING": raise ValueError(f'Request to {cur["hospital_name"]} is still awaiting a hospital decision')
     if cur and cur["status"] == "ACCEPTED": raise ValueError(f'{cur["hospital_name"]} has already accepted {a["id"]}')

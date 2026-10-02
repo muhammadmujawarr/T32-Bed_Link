@@ -1,14 +1,14 @@
-# BedLink/MedFlow
+# BedLink
 
 ## Emergency Response Coordination Platform
 
 **From the emergency call to the hospital handover: one connected emergency network.**
 
-BedLink/MedFlow is a browser-based emergency response coordination prototype that connects an ambulance console, a backend triage and hospital-matching layer, a hospital console, and a dispatch command center. It demonstrates how patient information, vital signs, hospital resources, acceptance decisions, and live operational events can move through one shared workflow.
+BedLink is a browser-based emergency response coordination prototype that connects an ambulance console, a backend triage and hospital-matching layer, a hospital console, and a dispatch command center. It demonstrates how patient information, vital signs, hospital resources, acceptance decisions, and live operational events can move through one shared workflow.
 
 > The goal is not simply to find a hospital. The goal is to help identify a hospital that is operationally prepared to receive the patient.
 
-BedLink/MedFlow is a demonstration application only. Its triage score is rule-based and not clinically validated. It must not be used for real medical care or real patient information.
+BedLink is a demonstration application only. Its triage score is rule-based and not clinically validated. It must not be used for real medical care or real patient information.
 
 ## Table of Contents
 
@@ -57,7 +57,7 @@ Most basic emergency transport applications stop at:
 Find hospital -> Show ETA -> Navigate
 ```
 
-BedLink/MedFlow demonstrates a broader coordination flow:
+BedLink demonstrates a broader coordination flow:
 
 ```text
 Ambulance -> Patient -> Live vitals -> Hospital matching

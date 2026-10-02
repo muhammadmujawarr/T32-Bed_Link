@@ -79,6 +79,15 @@ def match(req, t):
 def hospital_has_resources(h, required):
     return all(h[RES[r][0]][RES[r][1]][0] > 0 for r in required)
 
+def reserve_resources(h, required):
+    for r in required:
+        kind, name = RES[r]
+        item = h[kind][name]
+        prev = item[0]
+        item[0], item[2] = prev - 1, time.time()
+        h["log"].insert(0, dict(t=now(), ts=item[2], cat=kind, name=name, prev=prev, new=item[0], by="Acceptance"))
+    del h["log"][100:]
+
 def refresh():
     S["now"] = t = time.time()
     for aid, a in S["ambulances"].items():
@@ -186,9 +195,9 @@ def q_accept(b):  # the ONLY place a request goes PENDING -> ACCEPTED (explicit 
     a, r, h = decision(b); hid = r["hospital_id"]
     if not hospital_has_resources(h, r["required"]):
         raise ValueError("Cannot accept: required equipment or bed capacity is unavailable")
+    reserve_resources(h, r["required"])
     r.update(status="ACCEPTED", state="Accepted", confirmed=True, deadline=None, decision_at=stamp())  # stops the countdown + the chain
     a.update(accepted=True, status="EN ROUTE", hospital=hid, dest=h["name"], eta=r["eta"])
-    h["capacity"]["Emergency Beds"][0] = max(0, h["capacity"]["Emergency Beds"][0] - 1); h["capacity"]["Emergency Beds"][2] = time.time()
     msg = f'{h["name"]} accepted {a["id"]}'
     ev("hospital", msg, False, a["id"], hid); ev("ambulance", msg, False, a["id"]); ev("dispatch", msg, False, a["id"])
 

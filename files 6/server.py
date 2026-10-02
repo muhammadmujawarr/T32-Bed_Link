@@ -72,12 +72,32 @@ def match(req, t):
         fr = dict(resource=sum(i["ok"] for i in items) / len(items), bed=0 if bq == 0 else 1 if bq >= 2 else .6, travel=max(0, 1 - eta / 30),
                   freshness=1 if age < 30 else 1 - (age - 30) / 540 if age < 300 else max(0, .5 * (900 - age) / 600), load=1 - load)
         pts = {k: round(W[k] * v, 1) for k, v in fr.items()}
-        out.append(dict(id=hid, name=h["name"], score=round(sum(pts.values())), eta=eta, km=h["km"], load=round(load * 100), res=items, bed=dict(name=bed, avail=bq, ok=bq > 0),
-                        fresh=dict(age=int(age), state="LIVE" if age < 60 else "AGING" if age < 900 else "STALE"), fr=fr, pts=pts, ok=fr["resource"] == 1 and bq > 0))
+        staff_ok = hospital_has_staff(h)
+        out.append(dict(id=hid, name=h["name"], score=round(sum(pts.values())), eta=eta, km=h["km"], load=round(load * 100), res=items, bed=dict(name=bed, avail=bq, ok=bq > 0), staff_ok=staff_ok,
+                        fresh=dict(age=int(age), state="LIVE" if age < 60 else "AGING" if age < 900 else "STALE"), fr=fr, pts=pts, ok=fr["resource"] == 1 and bq > 0 and staff_ok))
     return sorted(out, key=lambda m: -m["score"])
+
+def hospital_has_resources(h, required):
+    return all(h[RES[r][0]][RES[r][1]][0] > 0 for r in required)
+
+def hospital_has_staff(h):
+    return all(status == "AVAILABLE" for status in h["staff"].values())
+
+def hospital_is_eligible(h, required):
+    return hospital_has_resources(h, required) and hospital_has_staff(h)
+
+def reserve_resources(h, required):
+    for r in required:
+        kind, name = RES[r]
+        item = h[kind][name]
+        prev = item[0]
+        item[0], item[2] = prev - 1, time.time()
+        h["log"].insert(0, dict(t=now(), ts=item[2], cat=kind, name=name, prev=prev, new=item[0], by="Acceptance"))
+    del h["log"][100:]
 
 def refresh():
     S["now"] = t = time.time()
+    changed = False
     for aid, a in S["ambulances"].items():
         if not a.get("need"): continue
         ms = S["matches"][aid] = match(a["need"]["req"], t); rec = S["scores"].setdefault(aid, {})
@@ -86,7 +106,17 @@ def refresh():
             if r is None: rec[m["id"]] = r = dict(last=m["score"], prev=None)
             elif abs(m["score"] - r["last"]) >= 3: ev("dispatch", f'Operation Match: {m["name"]} {r["last"]} → {m["score"]}', False, aid); r["prev"], r["last"] = r["last"], m["score"]
             m["prev"] = r["prev"]
-    return expire()
+        request = a.get("request")
+        if request and request["status"] == "PENDING":
+            offered = next((m for m in ms if m["id"] == request["hospital_id"]), None)
+            if not offered or not offered["ok"] or not S["hospitals"][request["hospital_id"]]["accepting"]:
+                hid, name = request["hospital_id"], request["hospital_name"]
+                h = S["hospitals"][hid]
+                reason = "Staff unavailable" if not hospital_has_staff(h) else "Resources unavailable"
+                ev("hospital", f'{name} can no longer fulfill {aid}: {reason.lower()}', True, aid, hid)
+                advance(a, request, "DECLINED", reason)
+                changed = True
+    return expire() or changed
 
 def q_resource(b):
     h = S["hospitals"].get(b.get("hospital")); kind, name = b.get("kind"), b.get("name")
@@ -161,6 +191,14 @@ def q_request(b):  # ambulance -> ONE chosen hospital. Only creates a PENDING re
     a = amb(b["id"]); hid = b.get("hospital")
     if hid not in S["hospitals"]: raise ValueError("Unknown hospital")
     if not a.get("patient") or not a.get("vitals") or a["status"] in ("AVAILABLE", "ARRIVED"): raise ValueError("Pick a patient scenario first")
+    required = list((a.get("need") or {}).get("req", []))
+    if not hospital_has_resources(S["hospitals"][hid], required):
+        raise ValueError("This hospital does not have all required equipment or bed capacity")
+    if not hospital_has_staff(S["hospitals"][hid]):
+        raise ValueError("This hospital does not currently have all staff available")
+    candidate = next((m for m in match(required, time.time()) if m["id"] == hid), None)
+    if not candidate or not candidate["ok"] or not S["hospitals"][hid]["accepting"]:
+        raise ValueError("This hospital is not currently eligible for this request")
     cur = a.get("request")
     if cur and cur["status"] == "PENDING": raise ValueError(f'Request to {cur["hospital_name"]} is still awaiting a hospital decision')
     if cur and cur["status"] == "ACCEPTED": raise ValueError(f'{cur["hospital_name"]} has already accepted {a["id"]}')
@@ -178,9 +216,13 @@ def decision(b):  # shared guard: only the hospital the request was sent to may 
 
 def q_accept(b):  # the ONLY place a request goes PENDING -> ACCEPTED (explicit hospital ACCEPT click)
     a, r, h = decision(b); hid = r["hospital_id"]
+    if not hospital_has_resources(h, r["required"]):
+        raise ValueError("Cannot accept: required equipment or bed capacity is unavailable")
+    if not hospital_has_staff(h):
+        raise ValueError("Cannot accept: hospital staff are busy or off duty")
+    reserve_resources(h, r["required"])
     r.update(status="ACCEPTED", state="Accepted", confirmed=True, deadline=None, decision_at=stamp())  # stops the countdown + the chain
     a.update(accepted=True, status="EN ROUTE", hospital=hid, dest=h["name"], eta=r["eta"])
-    h["capacity"]["Emergency Beds"][0] = max(0, h["capacity"]["Emergency Beds"][0] - 1); h["capacity"]["Emergency Beds"][2] = time.time()
     msg = f'{h["name"]} accepted {a["id"]}'
     ev("hospital", msg, False, a["id"], hid); ev("ambulance", msg, False, a["id"]); ev("dispatch", msg, False, a["id"])
 

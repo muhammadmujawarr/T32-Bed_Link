@@ -1,4 +1,4 @@
-"""MedFlow backend (stdlib only). Ambulance -> backend (triage) -> Hospital + Dispatch, pushed live over SSE.
+"""BedLink backend (stdlib only). Ambulance -> backend (triage) -> Hospital + Dispatch, pushed live over SSE.
 Run: python3 server.py [port]. Triage score = transparent rule-based DEMO score, not clinical guidance."""
 import json, os, queue, sys, threading, time, copy
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -125,7 +125,7 @@ def q_query(b):
 DECLINE_REASONS = ["No ICU capacity", "No trauma bed", "Resources unavailable", "Emergency department overloaded", "Other"]
 def stamp(): return time.strftime("%Y-%m-%d %H:%M:%S")
 
-HOLD = int(os.environ.get("MEDFLOW_HOLD", "120"))  # seconds each offered hospital has to confirm (env override is for testing only)
+HOLD = int(os.environ.get("BEDLINK_HOLD", "120"))  # seconds each offered hospital has to confirm (env override is for testing only)
 def mmss(sec): return f"{sec // 60:02d}:{sec % 60:02d}"
 
 def next_hospital(a, r):  # deterministic: best-ranked hospital (existing Operation Match order) not yet tried, with all required resources + a bed, and accepting patients
@@ -275,4 +275,4 @@ class H(BaseHTTPRequestHandler):
             d = (Path(__file__).parent / "index.html").read_bytes(); self.send_response(200); self.send_header("Content-Type", "text/html; charset=utf-8"); self.send_header("Content-Length", str(len(d))); self.end_headers(); self.wfile.write(d)
 
 if __name__ == "__main__":
-    threading.Thread(target=ticker, daemon=True).start(); p = int(sys.argv[1]) if len(sys.argv) > 1 else 8100; print(f"MedFlow on http://localhost:{p}"); ThreadingHTTPServer(("0.0.0.0", p), H).serve_forever()
+    threading.Thread(target=ticker, daemon=True).start(); p = int(sys.argv[1]) if len(sys.argv) > 1 else 8100; print(f"BedLink on http://localhost:{p}"); ThreadingHTTPServer(("0.0.0.0", p), H).serve_forever()

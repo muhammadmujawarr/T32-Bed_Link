@@ -76,6 +76,9 @@ def match(req, t):
                         fresh=dict(age=int(age), state="LIVE" if age < 60 else "AGING" if age < 900 else "STALE"), fr=fr, pts=pts, ok=fr["resource"] == 1 and bq > 0))
     return sorted(out, key=lambda m: -m["score"])
 
+def hospital_has_resources(h, required):
+    return all(h[RES[r][0]][RES[r][1]][0] > 0 for r in required)
+
 def refresh():
     S["now"] = t = time.time()
     for aid, a in S["ambulances"].items():
@@ -161,6 +164,9 @@ def q_request(b):  # ambulance -> ONE chosen hospital. Only creates a PENDING re
     a = amb(b["id"]); hid = b.get("hospital")
     if hid not in S["hospitals"]: raise ValueError("Unknown hospital")
     if not a.get("patient") or not a.get("vitals") or a["status"] in ("AVAILABLE", "ARRIVED"): raise ValueError("Pick a patient scenario first")
+    required = list((a.get("need") or {}).get("req", []))
+    if not hospital_has_resources(S["hospitals"][hid], required):
+        raise ValueError("This hospital does not have all required equipment or bed capacity")
     cur = a.get("request")
     if cur and cur["status"] == "PENDING": raise ValueError(f'Request to {cur["hospital_name"]} is still awaiting a hospital decision')
     if cur and cur["status"] == "ACCEPTED": raise ValueError(f'{cur["hospital_name"]} has already accepted {a["id"]}')
@@ -178,6 +184,8 @@ def decision(b):  # shared guard: only the hospital the request was sent to may 
 
 def q_accept(b):  # the ONLY place a request goes PENDING -> ACCEPTED (explicit hospital ACCEPT click)
     a, r, h = decision(b); hid = r["hospital_id"]
+    if not hospital_has_resources(h, r["required"]):
+        raise ValueError("Cannot accept: required equipment or bed capacity is unavailable")
     r.update(status="ACCEPTED", state="Accepted", confirmed=True, deadline=None, decision_at=stamp())  # stops the countdown + the chain
     a.update(accepted=True, status="EN ROUTE", hospital=hid, dest=h["name"], eta=r["eta"])
     h["capacity"]["Emergency Beds"][0] = max(0, h["capacity"]["Emergency Beds"][0] - 1); h["capacity"]["Emergency Beds"][2] = time.time()
